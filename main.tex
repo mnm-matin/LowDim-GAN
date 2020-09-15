@@ -1,0 +1,29 @@
+ \documentclass[12pt,oneside]{report}
+ \title{Deep Learning}
+ \date{\today}
+ \author{Matin Mahmood}
+ \usepackage[y4project,fancyhdr,hyperref,colour]{edmaths}
+ \flushbottom
+
+ \begin{document}
+ \pagenumbering{roman}
+ \maketitle
+
+ \begin{abstract} ... Abstract text ... \end{abstract}
+ \declaration
+ \dedication{This paper is dedicated to Greyfriars Bobby}
+
+ \tableofcontents
+ \addcontentsline{toc}{chapter}{Contents}
+ \newpage
+ \pagenumbering{arabic}
+
+%  [Main document body here, e.g. \chaper{...} \section{...} ... ]
+
+\bibliographystyle{...} 
+% Or use the `amsrefs' package (http://www.ams.org/tex/amsrefs.html)!
+%\usepackage{amsrefs}
+
+\bibliography{bibliography file}
+\addcontentsline{toc}{chapter}{Bibliography}
+\end{document}
