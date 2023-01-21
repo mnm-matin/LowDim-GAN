@@ -1,92 +1,20 @@
 #%%
-import colorsys
-import os
-import pickle
-import statistics
-from scipy.signal import lfilter
 import torch
 import torch.optim as optim
 from torch import nn
-from rose_models import Discriminator, Generator
-from rose_plots import plot_2d
+
+
+import statistics
 import numpy as np
-from time import time
+
 import matplotlib.pyplot as plt
-from torch.distributions.uniform import Uniform
-from matplotlib import cm
 
-def target_function(Z):
-    '''
-    Map Z ([-1,1], [-1,1]) to a rose figure
-    '''
-    X = Z[:, 0]
-    Y = Z[:, 1]
-    theta = X * np.pi
-    r = 0.05*(Y+1) + 0.90*abs(np.cos(2*theta))
-    polar = np.zeros((Z.shape[0], 2))
-    polar[:, 0] = r * np.cos(theta)
-    polar[:, 1] = r * np.sin(theta)
-    return polar
+from utils import ema, load_pickle, save_pickle
+from rose_models import Discriminator, Generator
+from rose_plots import coloured_plt, plot_2d
+from rose_data import generate_noise, sample_from_target_function, sample_noise, target_function
 
-def sample_from_target_function(samples):
-    '''
-    sample from the target function
-    '''
-    generate_noise = lambda samples: np.random.uniform(-1, 1, (samples, 2))
-    Z = generate_noise(samples)
-    return torch.from_numpy(target_function(Z).astype('float32'))
-
-def generate_noise(samples):
-    '''
-    Generate `samples` samples of uniform noise in 
-    ([-1,1], [-1,1])
-    '''
-    return np.random.uniform(-1, 1, (samples, 2))
-
-def sample_noise(samples):
-    '''
-    Generate `samples` samples of uniform noise in 
-    ([-1,1], [-1,1])
-    '''
-    return Uniform(-1, 1).sample((samples,2)) 
-
-def save_pickle(name, dict_to_save, force=False):
-    if force or not os.path.exists(f'{name}.pickle') or os.stat(f'{name}.pickle').st_size==0:
-        print("saving pickle")
-        with open(f'{name}.pickle', 'wb') as handle:
-            pickle.dump(dict_to_save, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-def load_pickle(name):
-    if os.path.exists(f'{name}.pickle'):
-        print('loading pickle')
-        with open(f'{name}.pickle', 'rb') as handle:
-            return pickle.load(handle)
-    else:
-        print("File Not Found")
-
-# Plot Colour Coded
-def coloured_plt(input_points,output_points):
-    N = input_points.shape[0]
-    c = cm.rainbow(np.linspace(0, 1, N))
-    idx   = np.argsort(input_points[:, 0])
-    input_points_s = np.array(input_points)[idx]
-    output_points_s = np.array(output_points)[idx]
-
-    f, ax = plt.subplots(1, 2, figsize=(7.4, 3.7))
-    ax[0].scatter(input_points_s[:, 0], input_points_s[:, 1],
-                    edgecolor=c, facecolor='None', s=5, alpha=1, linewidth=1)
-    ax[1].scatter(output_points_s[:, 0], output_points_s[:, 1],
-                    edgecolor=c, facecolor='None', s=5, alpha=1, linewidth=1)
-    ax[0].set_xlim(-1, 1)
-    ax[0].set_ylim(-1, 1)
-    ax[0].set_aspect(1)
-    ax[1].set_xlim(-1, 1)
-    ax[1].set_ylim(-1, 1)
-    ax[1].set_aspect(1)
-    plt.tight_layout()
-    plt.show()
-    return f, ax
-
+from time import time
 #%%
 def V_GAN(
     generator=Generator(),
@@ -102,6 +30,30 @@ def V_GAN(
     batch_size=32,
     gen_size=4000,
     device='cpu'):
+    """ Vanilla GAN builder and trainer
+    Args:
+        generator: torch.nn.Module
+        discriminator: torch.nn.Module
+        noise_fn: function that returns a tensor of noise
+        data_fn: function that returns a tensor of data
+        plot_every: int, plot every n epochs
+        lr_d: float, learning rate for discriminator
+        lr_g: float, learning rate for generator
+        betas_adam: tuple, betas for Adam optimizer
+        epochs: int, number of epochs to train for
+        batches: int, number of batches per epoch
+        batch_size: int, batch size
+        gen_size: int, number of samples to generate for plotting
+        device: torch.device, device to train on
+    Returns:
+    A dictionary with the following keys:
+        losses: tuple, (loss_g, loss_d_real, loss_d_fake)
+            loss_g: list, generator loss
+            loss_d_real: list, discriminator loss on real data
+            loss_d_fake: list, discriminator loss on fake data
+        gen_samples: list, generated samples
+        latent_samples: list, latent samples
+    """
 
     generator = generator.to(device)
     discriminator = discriminator.to(device)
@@ -290,15 +242,6 @@ for lr in [0.0003, 0.0002, 0.00018, 0.00015, 0.0001]:
         # plot_2d(mc2_exp_l['gen_samples'][epoch], plot_target=True, save_fig=f'2d_mc2_{epoch+1}.pdf')
         plot_2d(gen_lr_exp[str(lr)]['gen_samples'][epoch], plot_target=True)
 
-
-#%%
-def ema(samples, alpha = 0.9):
-     # alpha smoothing coefficient
-    zi = [samples[0]] # seed the filter state with first value
-    # filter can process blocks of continuous data if <zi> is maintained
-    y, zi = lfilter([1.-alpha], [1., -alpha], samples, zi=zi)
-    return y
-
 metric_names = {
     'g-loss':'loss [G(z)]',
     'df-loss':'loss [D(G(z)]',
@@ -408,6 +351,11 @@ def V_GAN_smooth(
     gen_size=4000,
     device='cpu',
     one_sided = 0.9):
+    """
+    Vanilla GAN with smooth labels
+    Additional Args:
+        one_sided: Smoothened target for discriminator
+    """
 
     generator = generator.to(device)
     discriminator = discriminator.to(device)
@@ -597,11 +545,9 @@ fig_lr.tight_layout()
 # [EVAL Discriminator]
 eval_dis=Discriminator(layer_size=[2,512,512,512,1], layer_activation=nn.LeakyReLU(0.1))
 eval_dis = eval_dis.to('cpu')
-# criterion = nn.BCELoss()
 criterion = nn.MSELoss()
 noise_fn=generate_noise
 data_fn=sample_from_target_function
-
 optim_d = optim.Adam(eval_dis.parameters(),lr=1e-3)
 batch_size=64
 for epoch in range(400):
@@ -610,10 +556,8 @@ for epoch in range(400):
             eval_dis.zero_grad()
             gen_latent_vec = noise_fn(batch_size // 2) # Half Noise Samples
             target = sample_from_target_function(batch_size // 2) # Half Real Samples
-            samples = np.concatenate((gen_latent_vec, target), axis=0) # Combine Noise and Real
-            labels = np.concatenate((np.zeros((batch_size//2, 1)), np.ones((batch_size//2, 1))), axis=0) # Create Labels
-            samples = torch.from_numpy(samples.astype('float32'))
-            labels = torch.from_numpy(labels.astype('float32'))
+            samples = torch.from_numpy(np.concatenate((gen_latent_vec, target), axis=0).astype('float32')) # Combine Noise and Real
+            labels = torch.from_numpy(np.concatenate((np.zeros((batch_size//2, 1)), np.ones((batch_size//2, 1))), axis=0).astype('float32')) # Create Labels
             conf = eval_dis(samples)
             loss = criterion(conf, labels)
             loss.backward()
@@ -720,14 +664,14 @@ for epoch in [49, 449, 559, 579, 599]:
 # ------ Spherical --------
 
 #%%
-def sample_spherical(npoints, ndim=3):
-    vec = np.random.randn(ndim, npoints)
-    vec /= np.linalg.norm(vec, axis=0)
-    return vec
+def sample_spherical(samples, hypersphere_dim=3):
+    sphere_sample = np.random.randn(hypersphere_dim, samples)
+    sphere_sample /= np.linalg.norm(sphere_sample, axis=0)
+    return sphere_sample
 
 #%%
 gen_sample = os_exp['0.6']['gen_samples'][598]
-latent_sample = sample_spherical(1000, ndim=3).T[:,:2]
+latent_sample = sample_spherical(1000, hypersphere_dim=3).T[:,:2]
 f, ax = coloured_plt(latent_sample,gen_sample)
 
 #%%
